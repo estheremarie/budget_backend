@@ -1,3 +1,4 @@
+// backend/src/controllers/compte.controller.js
 const CompteModel = require('../models/compte.model');
 const { successResponse, errorResponse } = require('../utils/response');
 
@@ -71,5 +72,38 @@ exports.getRegionStats = async (req, res) => {
     return successResponse(res, 'Statistiques par région', stats);
   } catch (error) {
     return errorResponse(res, 'Erreur lors de la récupération des statistiques', 500);
+  }
+};
+
+// ✅ NOUVEAU : Récupérer les régulations d'un compte
+exports.getRegulations = async (req, res) => {
+  try {
+    const { num_compte, annee } = req.query;
+    const regulations = await CompteModel.getRegulations(num_compte, annee);
+    return successResponse(res, 'Régulations du compte', regulations);
+  } catch (error) {
+    return errorResponse(res, 'Erreur lors de la récupération des régulations', 500);
+  }
+};
+
+// ✅ NOUVEAU : Mettre à jour une régulation
+exports.updateRegulation = async (req, res) => {
+  try {
+    const { num_compte, annee, trimestre, taux_regulation } = req.body;
+    const regulation = await CompteModel.updateRegulation(num_compte, annee, trimestre, taux_regulation);
+    return successResponse(res, 'Régulation mise à jour', regulation);
+  } catch (error) {
+    return errorResponse(res, 'Erreur lors de la mise à jour de la régulation', 500);
+  }
+};
+
+// ✅ NOUVEAU : Récupérer les crédits annuels
+exports.getCreditsAnnules = async (req, res) => {
+  try {
+    const { num_compte, annee } = req.query;
+    const credits = await CompteModel.getCreditsAnnules(num_compte, annee);
+    return successResponse(res, 'Crédits annuels', credits);
+  } catch (error) {
+    return errorResponse(res, 'Erreur lors de la récupération des crédits', 500);
   }
 };

@@ -1,43 +1,105 @@
+// backend/src/models/compte.model.js
 const { pool } = require('../config/database');
 
 class CompteModel {
   static async findAll(annee, region) {
-    let query = 'SELECT * FROM comptes_budgetaires WHERE actif = true';
-    const params = [];
-    
-    if (annee) {
-      params.push(annee);
-      query += ` AND annee = $${params.length}`;
-    }
-    
+    let query = `
+      SELECT 
+        c.*,
+        ca.credit_initial as credit_annuel_initial,
+        ca.credit_actuel as credit_annuel_actuel,
+        (
+          SELECT json_agg(r.*) 
+          FROM regulations r 
+          WHERE r.num_compte = c.num_compte 
+          AND r.annee = $1
+        ) as regulations
+      FROM comptes_budgetaires c
+      LEFT JOIN credits_annuels ca ON c.num_compte = ca.num_compte AND ca.annee = $1
+      WHERE c.actif = true
+    `;
+    const params = [annee || '2025'];
+    let paramCount = 2;
+
     if (region) {
       params.push(region);
-      query += ` AND region = $${params.length}`;
+      query += ` AND c.region = $${paramCount++}`;
     }
-    
-    query += ' ORDER BY num_compte';
-    
+
+    query += ' ORDER BY c.num_compte';
+
     const result = await pool.query(query, params);
     return result.rows;
   }
 
   static async findById(id) {
     const result = await pool.query(
-      'SELECT * FROM comptes_budgetaires WHERE id = $1',
+      `SELECT 
+        c.*,
+        ca.credit_initial as credit_annuel_initial,
+        ca.credit_actuel as credit_annuel_actuel,
+        (
+          SELECT json_agg(r.*) 
+          FROM regulations r 
+          WHERE r.num_compte = c.num_compte
+        ) as regulations,
+        (
+          SELECT json_agg(t.*) 
+          FROM transactions t 
+          WHERE t.compte_id = c.id
+          ORDER BY t.date_transaction DESC
+          LIMIT 10
+        ) as transactions_recentes
+      FROM comptes_budgetaires c
+      LEFT JOIN credits_annuels ca ON c.num_compte = ca.num_compte AND ca.annee = EXTRACT(YEAR FROM CURRENT_DATE)
+      WHERE c.id = $1 AND c.actif = true`,
       [id]
     );
     return result.rows[0];
   }
 
   static async create(data) {
-    const { num_compte, nom_compte, credit_initial, credit_actuel, taux_global, region, annee } = data;
-    const result = await pool.query(
-      `INSERT INTO comptes_budgetaires 
-       (num_compte, nom_compte, credit_initial, credit_actuel, taux_global, region, annee) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [num_compte, nom_compte, credit_initial, credit_actuel || 0, taux_global || 0, region || 'Haute Matsiatra', annee]
-    );
-    return result.rows[0];
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const { num_compte, nom_compte, credit_initial, credit_actuel, taux_global, region, annee } = data;
+
+      // Créer le compte
+      const result = await client.query(
+        `INSERT INTO comptes_budgetaires 
+         (num_compte, nom_compte, credit_initial, credit_actuel, credit_consomme, taux_global, region, annee) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [num_compte, nom_compte, credit_initial, credit_actuel || 0, credit_initial - (credit_actuel || 0), taux_global || 0, region || 'Haute Matsiatra', annee]
+      );
+
+      const compte = result.rows[0];
+
+      // Créer les crédits annuels
+      await client.query(
+        `INSERT INTO credits_annuels (num_compte, annee, credit_initial, credit_actuel) 
+         VALUES ($1, $2, $3, $4)`,
+        [num_compte, parseInt(annee), credit_initial, credit_actuel || 0]
+      );
+
+      // Créer les régulations par trimestre (par défaut)
+      const trimestres = [1, 2, 3, 4];
+      for (const trimestre of trimestres) {
+        await client.query(
+          `INSERT INTO regulations (num_compte, annee, trimestre, taux_regulation) 
+           VALUES ($1, $2, $3, $4)`,
+          [num_compte, parseInt(annee), trimestre, 0]
+        );
+      }
+
+      await client.query('COMMIT');
+      return compte;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   static async update(id, data) {
@@ -68,7 +130,7 @@ class CompteModel {
 
     values.push(id);
     const query = `UPDATE comptes_budgetaires SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${paramCount} RETURNING *`;
-    
+
     const result = await pool.query(query, values);
     return result.rows[0];
   }
@@ -105,6 +167,53 @@ class CompteModel {
     const result = await pool.query(
       'UPDATE comptes_budgetaires SET actif = false WHERE id = $1 RETURNING *',
       [id]
+    );
+    return result.rows[0];
+  }
+
+  // ✅ NOUVEAU : Récupérer les régulations d'un compte
+  static async getRegulations(num_compte, annee) {
+    const result = await pool.query(
+      `SELECT * FROM regulations 
+       WHERE num_compte = $1 AND annee = $2 
+       ORDER BY trimestre`,
+      [num_compte, annee]
+    );
+    return result.rows;
+  }
+
+  // ✅ NOUVEAU : Mettre à jour une régulation
+  static async updateRegulation(num_compte, annee, trimestre, taux_regulation) {
+    const result = await pool.query(
+      `INSERT INTO regulations (num_compte, annee, trimestre, taux_regulation) 
+       VALUES ($1, $2, $3, $4) 
+       ON CONFLICT (num_compte, annee, trimestre) 
+       DO UPDATE SET taux_regulation = $4, date_modification = CURRENT_TIMESTAMP 
+       RETURNING *`,
+      [num_compte, annee, trimestre, taux_regulation]
+    );
+    return result.rows[0];
+  }
+
+  // ✅ NOUVEAU : Récupérer les crédits annuels
+  static async getCreditsAnnules(num_compte, annee) {
+    const result = await pool.query(
+      `SELECT * FROM credits_annuels 
+       WHERE num_compte = $1 AND annee = $2`,
+      [num_compte, annee]
+    );
+    return result.rows[0];
+  }
+
+  // ✅ NOUVEAU : Mettre à jour les crédits annuels
+  static async updateCreditsAnnules(num_compte, annee, credit_initial, credit_actuel) {
+    const result = await pool.query(
+      `INSERT INTO credits_annuels (num_compte, annee, credit_initial, credit_actuel) 
+       VALUES ($1, $2, $3, $4) 
+       ON CONFLICT (num_compte, annee) 
+       DO UPDATE SET credit_initial = $3, credit_actuel = $4, date_modification = CURRENT_TIMESTAMP 
+       RETURNING *`,
+      [num_compte, annee, credit_initial, credit_actuel]
     );
     return result.rows[0];
   }

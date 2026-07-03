@@ -1,3 +1,4 @@
+// backend/src/routes/compte.routes.js
 const express = require('express');
 const router = express.Router();
 const compteController = require('../controllers/compte.controller');
@@ -10,5 +11,10 @@ router.get('/:id', verifyToken, compteController.getById);
 router.post('/', verifyToken, compteController.create);
 router.put('/:id', verifyToken, compteController.update);
 router.delete('/:id', verifyToken, compteController.delete);
+
+// ✅ NOUVELLES ROUTES
+router.get('/regulations', verifyToken, compteController.getRegulations);
+router.put('/regulations', verifyToken, compteController.updateRegulation);
+router.get('/credits-annuels', verifyToken, compteController.getCreditsAnnules);
 
 module.exports = router;

@@ -1,3 +1,4 @@
+// backend/src/controllers/dashboard.controller.js
 const CompteModel = require('../models/compte.model');
 const TransactionModel = require('../models/transaction.model');
 const { successResponse, errorResponse } = require('../utils/response');
@@ -12,6 +13,12 @@ exports.getDashboardData = async (req, res) => {
     const budgetTotal = parseFloat(stats.total_credit) || 0;
     const totalConsomme = parseFloat(stats.total_consomme) || 0;
     const tauxExecution = budgetTotal > 0 ? (totalConsomme / budgetTotal) * 100 : 0;
+
+    // ✅ Récupérer les demandes en attente
+    const demandesEnAttente = await TransactionModel.getDemandes('en_attente');
+
+    // ✅ Récupérer les notifications non lues
+    const notifications = await TransactionModel.getNotifications(req.userEmail);
 
     const dashboardData = {
       budget: {
@@ -30,6 +37,20 @@ exports.getDashboardData = async (req, res) => {
         total: parseFloat(r.total_credit) || 0,
         taux: parseFloat(r.taux_moyen) || 0,
         comptes: parseInt(r.total_comptes) || 0
+      })),
+      demandesEnAttente: demandesEnAttente.map(d => ({
+        id: d.id,
+        compte: d.num_compte,
+        montant: d.montant_engagement,
+        date: d.date_creation,
+        demandeur: d.comptable_email
+      })),
+      notifications: notifications.map(n => ({
+        id: n.id,
+        message: n.message,
+        type: n.type,
+        date: n.date_creation,
+        lien: n.lien
       })),
       alertes: await getAlertes()
     };
