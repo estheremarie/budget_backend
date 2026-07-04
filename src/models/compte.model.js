@@ -63,14 +63,21 @@ class CompteModel {
     try {
       await client.query('BEGIN');
 
-      const { num_compte, nom_compte, credit_initial, credit_actuel, taux_global, region, annee } = data;
+      const { num_compte, nom_compte, credit_initial, credit_actuel, region, annee } = data;
+
+      // ✅ Calcul automatique
+      const creditActuel = credit_actuel || 0;
+      const creditConsomme = credit_initial - creditActuel;
+      const tauxGlobal = credit_initial > 0 
+        ? parseFloat(((creditConsomme / credit_initial) * 100).toFixed(2))
+        : 0;
 
       // Créer le compte
       const result = await client.query(
         `INSERT INTO comptes_budgetaires 
          (num_compte, nom_compte, credit_initial, credit_actuel, credit_consomme, taux_global, region, annee) 
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-        [num_compte, nom_compte, credit_initial, credit_actuel || 0, credit_initial - (credit_actuel || 0), taux_global || 0, region || 'Haute Matsiatra', annee]
+        [num_compte, nom_compte, credit_initial, creditActuel, creditConsomme, tauxGlobal, region || 'Haute Matsiatra', annee]
       );
 
       const compte = result.rows[0];
@@ -79,16 +86,26 @@ class CompteModel {
       await client.query(
         `INSERT INTO credits_annuels (num_compte, annee, credit_initial, credit_actuel) 
          VALUES ($1, $2, $3, $4)`,
-        [num_compte, parseInt(annee), credit_initial, credit_actuel || 0]
+        [num_compte, parseInt(annee), credit_initial, creditActuel]
       );
 
-      // Créer les régulations par trimestre (par défaut)
-      const trimestres = [1, 2, 3, 4];
-      for (const trimestre of trimestres) {
+      // ✅ Calcul automatique des régulations par trimestre
+      const trimestres = [
+        { trimestre: 1, facteur: 0.25 },
+        { trimestre: 2, facteur: 0.50 },
+        { trimestre: 3, facteur: 0.75 },
+        { trimestre: 4, facteur: 1.00 }
+      ];
+
+      for (const t of trimestres) {
+        const tauxTrimestre = credit_initial > 0 
+          ? parseFloat(((creditConsomme * t.facteur / credit_initial) * 100).toFixed(2))
+          : 0;
+
         await client.query(
           `INSERT INTO regulations (num_compte, annee, trimestre, taux_regulation) 
            VALUES ($1, $2, $3, $4)`,
-          [num_compte, parseInt(annee), trimestre, 0]
+          [num_compte, parseInt(annee), t.trimestre, tauxTrimestre]
         );
       }
 
@@ -193,6 +210,56 @@ class CompteModel {
       [num_compte, annee, trimestre, taux_regulation]
     );
     return result.rows[0];
+  }
+
+  // ✅ NOUVEAU : Mettre à jour les régulations automatiquement
+  static async updateRegulationsAuto(num_compte, annee) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const compteResult = await client.query(
+        `SELECT credit_initial, credit_actuel FROM comptes_budgetaires 
+         WHERE num_compte = $1 AND annee = $2`,
+        [num_compte, annee]
+      );
+
+      if (compteResult.rows.length === 0) {
+        throw new Error('Compte non trouvé');
+      }
+
+      const { credit_initial, credit_actuel } = compteResult.rows[0];
+      const creditConsomme = credit_initial - credit_actuel;
+
+      const trimestres = [
+        { trimestre: 1, facteur: 0.25 },
+        { trimestre: 2, facteur: 0.50 },
+        { trimestre: 3, facteur: 0.75 },
+        { trimestre: 4, facteur: 1.00 }
+      ];
+
+      for (const t of trimestres) {
+        const tauxTrimestre = credit_initial > 0 
+          ? parseFloat(((creditConsomme * t.facteur / credit_initial) * 100).toFixed(2))
+          : 0;
+
+        await client.query(
+          `INSERT INTO regulations (num_compte, annee, trimestre, taux_regulation) 
+           VALUES ($1, $2, $3, $4) 
+           ON CONFLICT (num_compte, annee, trimestre) 
+           DO UPDATE SET taux_regulation = $4, date_modification = CURRENT_TIMESTAMP`,
+          [num_compte, annee, t.trimestre, tauxTrimestre]
+        );
+      }
+
+      await client.query('COMMIT');
+      return true;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   // ✅ NOUVEAU : Récupérer les crédits annuels
