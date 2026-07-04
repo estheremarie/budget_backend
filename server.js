@@ -20,7 +20,7 @@ pool.query('SELECT NOW()', (err, res) => {
   app.listen(PORT, () => {
     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
     console.log(`📊 Environnement: ${config.nodeEnv}`);
-    console.log(`📡 Accessible depuis le réseau sur http://192.168.88.16:${PORT}`);
+    console.log(`📡 Accessible depuis le réseau sur http://10.32.108.174:${PORT}`);
   });
 });
 
