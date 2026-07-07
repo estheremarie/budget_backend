@@ -1,13 +1,13 @@
-// backend/scripts/init_db.js
+// scripts/init_db.js
 const bcrypt = require('bcryptjs');
 const { Pool } = require('pg');
 
-// ✅ Utilisez le mot de passe de votre .env
+// ✅ Utilisez votre mot de passe PostgreSQL (1234)
 const pool = new Pool({
   user: 'postgres',
   host: 'localhost',
   database: 'budget_db',
-  password: 'postgres', // ⚠️ Remplacez par votre vrai mot de passe
+  password: '1234', // ⚠️ Changer ici
   port: 5432,
 });
 
