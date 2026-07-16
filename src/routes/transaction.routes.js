@@ -4,11 +4,14 @@ const router = express.Router();
 const transactionController = require('../controllers/transaction.controller');
 const { verifyToken } = require('../middlewares/auth.middleware');
 
+// ✅ ROUTE PRINCIPALE POUR CRÉER UNE TRANSACTION (POST /api/transactions)
+router.post('/', verifyToken, transactionController.createTransaction);
+
 // Routes existantes
 router.get('/', verifyToken, transactionController.getAll);
 router.get('/summary', verifyToken, transactionController.getSummary);
 
-// ✅ NOUVELLES ROUTES
+// Routes pour les demandes
 router.get('/demandes', verifyToken, transactionController.getDemandes);
 router.post('/demandes', verifyToken, transactionController.createDemande);
 router.put('/demandes/:id/approuver', verifyToken, transactionController.approuverDemande);
